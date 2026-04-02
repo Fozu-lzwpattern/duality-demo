@@ -347,29 +347,15 @@ export function registerScene4Routes(app: FastifyInstance): void {
         await emit(sceneId, {
           type: 'contract',
           step: 6,
-          title: '❌ asB 拒绝合约',
-          description: `用户信用评分（LTV ${user.ltv}）不满足最低门槛 ${LTV_THRESHOLD}，协商终止`,
+          title: '❌ asB 拒绝原始合约',
+          description: `LTV ${user.ltv} < 门槛 ${LTV_THRESHOLD}，原始意图（¥30优惠）无法达成`,
           data: {
             role: 'asB',
             decision: 'reject',
             reason: `LTV(${user.ltv}) < 信用门槛(${LTV_THRESHOLD})`,
             contractStatus: 'REJECTED',
-            suggestion: '建议先积累更多消费记录后再发起合约',
           },
         }, 600)
-
-        await emit(sceneId, {
-          type: 'contract',
-          step: 7,
-          title: 'asC 收到拒绝通知',
-          description: '本次合约协商未达成，asC 记录拒绝原因并归档',
-          data: {
-            role: 'asC',
-            received: 'REJECTED',
-            contractId: contract.id,
-            archiveReason: `信用评分不足，LTV ${user.ltv}`,
-          },
-        }, 500)
 
         addAudit({
           sceneId,
@@ -386,17 +372,200 @@ export function registerScene4Routes(app: FastifyInstance): void {
           result: 'rejected',
         })
 
+        // ─── asB 主动发起反向提案：凑单升客单 ─────────────────────────────────
+        await emit(sceneId, {
+          type: 'contract',
+          step: 7,
+          title: 'asB 主动反向提案',
+          description: '合约经济的关键：asB 不是终止者，而是寻路者——主动找到新的成交路径',
+          data: {
+            role: 'asB',
+            action: 'counter_proposal',
+            insight: '虽然信用评分不足，但 asB 识别到供给侧有"一人食至尊日料套餐"，客单价更高，系统毛利更优，可给予更大让利',
+            proposal: {
+              productName: '一人食至尊日料',
+              description: '同店套餐，含刺身+热食+汤',
+              originalPrice: 236,
+              maxBenefit: 40,
+              window: '今晚',
+              note: '凑单提客单价，解锁更高优惠档位',
+            },
+          },
+        }, 800)
+
+        // asB 发出新草案
+        const reproposedDraft = {
+          productName: '一人食至尊日料',
+          originalPrice: 236,
+          discount: 0.83,
+          maxBenefit: 40,
+          window: '今晚 19:00-21:00',
+          note: '凑单套餐，客单价升级，让利上限 ¥40',
+        }
+
+        const round3_reproposal: ContractRound = {
+          round: 3,
+          role: 'asB',
+          type: 'draft',
+          payload: {
+            draft: reproposedDraft,
+            counterProposal: true,
+            reason: '主动寻路：升客单换更高让利',
+          },
+          timestamp: Date.now(),
+        }
+
+        // 创建新合约（原合约已 REJECTED，开新合约轮次）
+        const contract2 = createContract(userId, `${intent}（套餐升级版）`)
+        updateContract(contract2.id, {
+          status: 'NEGOTIATING',
+          currentDraft: reproposedDraft,
+          negotiationRounds: [round3_reproposal],
+        })
+
+        await emit(sceneId, {
+          type: 'contract',
+          step: 8,
+          title: 'asB 发出升级草案',
+          description: `「一人食至尊日料，同店套餐，原价 ¥236，今晚，最高优惠 ¥40」`,
+          data: {
+            role: 'asB',
+            contractId: contract2.id,
+            draft: reproposedDraft,
+            round: 3,
+            isCounterProposal: true,
+          },
+        }, 700)
+
+        // asC 评估新提案
+        await emit(sceneId, {
+          type: 'contract',
+          step: 9,
+          title: 'asC 评估升级提案',
+          description: `asC 代 Bob 评估：¥236 - ¥40 = 实付 ¥196，人均低于原意图上限，且套餐更丰盛`,
+          data: {
+            role: 'asC',
+            evaluation: {
+              originalBudget: 150,
+              proposedPrice: 236,
+              discount: 40,
+              finalPrice: 196,
+              verdict: '实付¥196 > 原预算¥150，但套餐更具性价比',
+              decision: 'accept',
+              reasoning: '性价比优于原意图，asC 代用户接受升级提案',
+            },
+          },
+        }, 900)
+
+        const round3_accept: ContractRound = {
+          round: 3,
+          role: 'asC',
+          type: 'accept',
+          payload: { accepted: true, finalBenefit: 40, note: 'asC 代用户接受升级提案' },
+          timestamp: Date.now(),
+        }
+        const c2upd = getContract(contract2.id)!
+        updateContract(contract2.id, {
+          negotiationRounds: [...c2upd.negotiationRounds, round3_accept],
+        })
+
+        // STRIKE 升级合约
+        updateContract(contract2.id, { status: 'STRIKE' })
+        await emit(sceneId, {
+          type: 'contract',
+          step: 10,
+          title: '🤝 升级合约成交：STRIKE',
+          description: `asB 寻路成功，双方就升级套餐达成协议，最终让利 ¥40`,
+          data: {
+            contractId: contract2.id,
+            status: 'STRIKE',
+            finalBenefit: 40,
+            originalContractId: contract.id,
+            originalStatus: 'REJECTED',
+            narrative: 'asB 从"守门拒绝"到"主动寻路"——这就是合约经济与传统规则引擎的本质差异',
+          },
+        }, 600)
+
+        // dynamicMint 升级券
+        const coupon2 = createCoupon({
+          templateId: `dynamic_upgrade_${contract2.id}`,
+          userId,
+          status: 'ACTIVE',
+          businessType: '到餐',
+          discountType: 'FIXED',
+          discountValue: 40,
+          minOrderAmount: 200,
+          validFrom: new Date().toISOString(),
+          validUntil: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
+        })
+
+        await emit(sceneId, {
+          type: 'step',
+          step: 11,
+          title: '⚡ dynamicMint — 实时制券（升级版）',
+          description: `按升级合约实时铸造：满¥200减¥40，仅限「一人食至尊日料」，今晚有效`,
+          data: {
+            couponId: coupon2.id,
+            discountValue: 40,
+            minOrderAmount: 200,
+            productBound: '一人食至尊日料',
+            validWindow: '4小时',
+            minted: 'on-demand',
+          },
+        }, 700)
+
+        const issuedCoupon2 = updateCoupon(coupon2.id, {
+          status: 'ISSUED',
+          issuedAt: new Date().toISOString(),
+        })!
+
+        updateContract(contract2.id, {
+          status: 'FULFILLED',
+          couponId: coupon2.id,
+        })
+
+        await emit(sceneId, {
+          type: 'state_change',
+          step: 12,
+          title: '发券完成：issueByContract → ISSUED',
+          description: `升级合约履约，券状态 ACTIVE → ISSUED，合约 → FULFILLED`,
+          data: {
+            couponId: issuedCoupon2.id,
+            couponStatus: 'ISSUED',
+            contractId: contract2.id,
+            contractStatus: 'FULFILLED',
+          },
+        }, 500)
+
+        const finalContract2 = getContract(contract2.id)!
+        addAudit({
+          sceneId,
+          userId,
+          action: 'CONTRACT_FULFILLED',
+          payload: {
+            contractId: contract2.id,
+            originalContractId: contract.id,
+            couponId: issuedCoupon2.id,
+            finalBenefit: 40,
+            rounds: 3,
+            intent: `${intent}（asB升级提案）`,
+            negotiationRounds: finalContract2.negotiationRounds,
+            note: 'asB 主动寻路，从 REJECTED 反转为 FULFILLED',
+          },
+          operator: 'agent',
+          result: 'success',
+        })
+
         await emit(sceneId, {
           type: 'complete',
-          step: 8,
-          title: '场景4完成（协商失败）',
-          description: `合约经济的另一面：并非所有合约都会成交，系统有信用门槛保护`,
+          step: 13,
+          title: '场景4完成 ✅（完整合约经济演示）',
+          description: `新用户信用不足 → asB 拒绝 → asB 主动寻路 → 升级合约 STRIKE → 实时制券 → 履约`,
           data: {
-            contractId: contract.id,
-            status: 'REJECTED',
-            ltv: user.ltv,
-            ltvThreshold: LTV_THRESHOLD,
-            message: '切换高价值用户（Alice/Carol/David）可观察到合约成交路径',
+            originalContract: { id: contract.id, status: 'REJECTED', reason: `LTV ${user.ltv} < 门槛 ${LTV_THRESHOLD}` },
+            upgradeContract: { id: contract2.id, status: 'FULFILLED', finalBenefit: 40 },
+            couponId: issuedCoupon2.id,
+            keyInsight: 'asB 不是规则守门员，而是有主体性的商业智能体——拒绝是手段，成交才是目标',
           },
         }, 400)
       } else {
