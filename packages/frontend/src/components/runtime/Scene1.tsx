@@ -19,7 +19,7 @@ const Scene1: React.FC = () => {
       subtitle="asC 发出购餐意图 → 用户画像评估 → Gate 检查 → dynamicMint → 实时发券"
       badge="Scene 1"
       badgeColor="#20c4cb"
-      runEndpoint="/api/scene/1/run"
+      runEndpoint="/scene/1/run"
       runBody={() => ({ userId: selectedUser, intent: '帮我找家日料，150以内，今晚' })}
       extraControls={
         <div className="flex items-center gap-2">

@@ -1,3 +1,4 @@
+import EventEmitter from 'events'
 import type { FastifyInstance } from 'fastify'
 import { emitToScene } from '../runtime/events.js'
 import {
@@ -6,6 +7,23 @@ import {
 } from '../coupon/store.js'
 import { getUser } from '../users/presets.js'
 import type { SceneEvent, ContractRound } from '../coupon/types.js'
+
+// ─── Manual Mode: per-contract response emitters ──────────────────────────────
+const manualEmitters = new Map<string, EventEmitter>()
+
+type ManualDecision = { action: 'accept' | 'counter' | 'reject'; counterText?: string }
+
+async function waitForManualResponse(contractId: string, timeoutMs = 60000): Promise<ManualDecision> {
+  const emitter = manualEmitters.get(contractId)
+  if (!emitter) return { action: 'accept' }
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ action: 'accept' }), timeoutMs)
+    emitter.once('decision', (d: ManualDecision) => {
+      clearTimeout(timer)
+      resolve(d)
+    })
+  })
+}
 
 async function emit(sceneId: string, event: Omit<SceneEvent, 'timestamp'>, delay = 900): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, delay))
@@ -132,20 +150,30 @@ export function registerScene4Routes(app: FastifyInstance): void {
    * 场景4：合约协商（含反询，2轮）
    * asC 发出意图 → asB 评估画像 → 草案v1 → 反询 → 草案v2 → STRIKE
    * → dynamicMint → issueByContract → FULFILLED
+   *
+   * mode: 'auto' — 全自动（默认）| 'manual' — 草案出现后暂停等待前端 POST /api/scene/4/respond
    */
   app.post<{
     Body: {
       userId?: string
       intent?: string
       autoAccept?: boolean
+      mode?: 'auto' | 'manual'
     }
   }>('/api/scene/4/run', async (req, reply) => {
     const userId = req.body?.userId ?? 'alice'
     const intent = req.body?.intent ?? '日料，150以内，今晚'
-    const autoAccept = req.body?.autoAccept ?? false
+    const mode = req.body?.mode ?? 'auto'
+    const autoAccept = req.body?.autoAccept ?? (mode === 'auto' ? false : false)
     const sceneId = '4'
 
-    reply.send({ ok: true, message: 'Scene 4 started', sceneId, userId, intent, autoAccept })
+    reply.send({ ok: true, message: 'Scene 4 started', sceneId, userId, intent, mode, autoAccept })
+
+    // Setup manual emitter before async work
+    if (mode === 'manual') {
+      const emitter = new EventEmitter()
+      manualEmitters.set('current', emitter) // simple key; one active scene at a time
+    }
 
     const user = getUser(userId)
     if (!user) return
@@ -229,7 +257,21 @@ export function registerScene4Routes(app: FastifyInstance): void {
       negotiationRounds: [...currentContract.negotiationRounds, round1_draft],
     })
 
-    if (autoAccept) {
+    // ─── Decide what asC does after draft v1 ─────────────────────────────────
+    let decision1: ManualDecision = { action: 'counter', counterText: '能不能再多¥6？' }
+    if (mode === 'manual') {
+      // Signal front-end that we're waiting
+      await emit(sceneId, {
+        type: 'contract',
+        step: 3,
+        title: '⏸ 等待您的决策...',
+        description: '请在合约面板选择「接受」或「反询」',
+        data: { waiting: true, contractId: contract.id, draft: draft1 },
+      }, 0)
+      decision1 = await waitForManualResponse('current')
+    }
+
+    if (autoAccept || decision1.action === 'accept') {
       await emit(sceneId, {
         type: 'contract',
         step: 4,
@@ -237,22 +279,24 @@ export function registerScene4Routes(app: FastifyInstance): void {
         description: `接受 ¥${draft1.maxBenefit} 方案，进入合约成交阶段`,
         data: { role: 'asC', decision: 'accept', draft: draft1 },
       })
+      manualEmitters.delete('current')
       await executeContractStrike(sceneId, contract.id, userId, draft1.maxBenefit, 1, intent)
     } else {
+      const counterText = decision1.counterText ?? '能不能再多¥6？'
       // Step 4: asC counter-offer
       await emit(sceneId, {
         type: 'contract',
         step: 4,
         title: 'asC 发出反询（Round 2）',
-        description: '用户侧 Agent 发起反向询价：能不能再多 ¥6？',
-        data: { role: 'asC', type: 'counter', counter: '能不能再多¥6？', currentBenefit: draft1.maxBenefit },
+        description: `用户侧 Agent 发起反向询价：${counterText}`,
+        data: { role: 'asC', type: 'counter', counter: counterText, currentBenefit: draft1.maxBenefit },
       })
 
       const round2_counter: ContractRound = {
         round: 2,
         role: 'asC',
         type: 'counter',
-        payload: { counter: '能不能再多¥6？', targetBenefit: 36 },
+        payload: { counter: counterText, targetBenefit: 36 },
         timestamp: Date.now(),
       }
       const c2 = getContract(contract.id)!
@@ -333,4 +377,25 @@ export function registerScene4Routes(app: FastifyInstance): void {
       await executeContractStrike(sceneId, contract.id, userId, finalBenefit, 2, intent)
     }
   })
+
+  // ─── Manual Mode Response Endpoint ──────────────────────────────────────────
+  app.post<{
+    Body: {
+      contractId?: string
+      action: 'accept' | 'counter' | 'reject'
+      counterText?: string
+    }
+  }>('/api/scene/4/respond', async (req, reply) => {
+    const { action, counterText } = req.body ?? {}
+    if (!action) return reply.code(400).send({ ok: false, error: 'action required' })
+    const emitter = manualEmitters.get('current')
+    if (!emitter) return reply.code(404).send({ ok: false, error: 'No active manual session' })
+    emitter.emit('decision', { action, counterText } satisfies ManualDecision)
+    return { ok: true, action }
+  })
+
+  // ─── Pending scene 4 list ───────────────────────────────────────────────────
+  app.get('/api/scene/4/pending', async (_req, reply) => ({
+    pending: [...manualEmitters.keys()],
+  }))
 }

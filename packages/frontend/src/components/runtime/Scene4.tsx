@@ -29,12 +29,13 @@ const Scene4: React.FC = () => {
     await new Promise(r => setTimeout(r, 300))
     setRunning(true)
     try {
-      await apiFetch('/api/scene/4/run', {
+      await apiFetch('/scene/4/run', {
         method: 'POST',
         body: JSON.stringify({
           userId: selectedUser,
           intent: '日料，150以内，今晚',
-          mode: runMode,
+          mode: runMode, // 'auto' | 'manual'
+          // In manual mode, backend pauses at draft v1 waiting for POST /api/scene/4/respond
         }),
       })
     } catch (e) {

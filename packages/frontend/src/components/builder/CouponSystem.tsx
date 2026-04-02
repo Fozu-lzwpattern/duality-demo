@@ -2,6 +2,22 @@ import React, { useState, useEffect, useRef } from 'react'
 import { usePolling } from '../../hooks/useApi'
 import type { CouponStats } from '../../types'
 
+interface RawCouponStats {
+  totalTemplates: number
+  totalCoupons: number
+  totalIssued: number
+  totalRedeemed: number
+  totalExpired: number
+  pendingContracts: number
+  fulfilledContracts: number
+  auditEntries: number
+}
+
+interface RawCouponStatsResponse {
+  ok: boolean
+  data: RawCouponStats
+}
+
 // ——— 能力分组数据 ———
 const CAPABILITY_GROUPS = [
   {
@@ -128,8 +144,15 @@ const StatCard: React.FC<{ label: string; value: number | string; prefix?: strin
 // ——— 主组件 ———
 const CouponSystem: React.FC = () => {
   const [rulesOpen, setRulesOpen] = useState(true)
-  const fallbackStats: CouponStats = { templates: 12, issued: 0, redeemed: 0, activeContracts: 0, lockedAmount: 0 }
-  const { data: stats, error } = usePolling<CouponStats>('/coupon/stats', 5000, fallbackStats)
+  const fallbackRaw: RawCouponStatsResponse = { ok: false, data: { totalTemplates: 12, totalCoupons: 0, totalIssued: 0, totalRedeemed: 0, totalExpired: 0, pendingContracts: 0, fulfilledContracts: 0, auditEntries: 0 } }
+  const { data: rawStats, error } = usePolling<RawCouponStatsResponse>('/coupon/stats', 5000, fallbackRaw)
+  const stats: CouponStats = {
+    templates: rawStats?.data?.totalTemplates ?? 12,
+    issued: rawStats?.data?.totalIssued ?? 0,
+    redeemed: rawStats?.data?.totalRedeemed ?? 0,
+    activeContracts: rawStats?.data?.pendingContracts ?? 0,
+    lockedAmount: 0,
+  }
 
   return (
     <div className="flex flex-col gap-6 p-6 overflow-y-auto h-full">

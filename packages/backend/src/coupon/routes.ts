@@ -421,14 +421,22 @@ export function registerCouponRoutes(app: FastifyInstance): void {
     return reply.send({ ok: true, data: list })
   })
 
-  app.post<{ Params: { id: string }; Body: { approved: boolean; operator?: string } }>(
+  app.post<{ Params: { id: string }; Body: { approved?: boolean; decision?: string; operator?: string; reason?: string } }>(
     '/api/approvals/:id/decide',
     async (req, reply) => {
       const { id } = req.params
-      const { approved, operator = 'human' } = req.body
+      // support both {approved: bool} and {decision: 'approve'|'reject'}
+      const decision = req.body.decision
+      const approved = decision !== undefined
+        ? decision === 'approve'
+        : (req.body.approved ?? false)
+      const operator = req.body.operator ?? 'human'
+      const reason = req.body.reason ?? ''
+
       const approval = pendingApprovals.get(id)
       if (!approval) return reply.code(404).send({ ok: false, error: 'Approval not found' })
       pendingApprovals.delete(id)
+
       addAudit({
         sceneId: approval.sceneId,
         userId: 'system',
@@ -437,7 +445,58 @@ export function registerCouponRoutes(app: FastifyInstance): void {
         operator: 'human',
         result: approved ? 'success' : 'failed',
       })
-      return reply.send({ ok: true, data: { approved, operator, approvalId: id } })
+
+      reply.send({ ok: true, data: { approved, operator, approvalId: id } })
+
+      // Trigger scene2 follow-up SSE events after approval decision
+      if (approval.sceneId === '2') {
+        const sceneId = '2'
+        const delay = (ms: number) => new Promise(r => setTimeout(r, ms))
+        const { emitToScene } = await import('../runtime/events.js')
+        const { couponStore, updateCoupon } = await import('./store.js')
+
+        await delay(300)
+        emitToScene(sceneId, {
+          type: 'step',
+          step: 5,
+          title: approved ? '✅ 人工已批准' : '❌ 人工已拒绝',
+          description: approved
+            ? `操作员 [${operator}] 批准执行：清空所有券库存`
+            : `操作员 [${operator}] 拒绝：操作已取消，数据安全${reason ? ` (${reason})` : ''}`,
+          data: { approved, operator, approvalId: id },
+          timestamp: Date.now(),
+        })
+
+        if (approved) {
+          await delay(500)
+          const allCoupons = [...couponStore.values()]
+          let expired = 0
+          for (const c of allCoupons) {
+            if (c.status !== 'REDEEMED' && c.status !== 'EXPIRED') {
+              updateCoupon(c.id, { status: 'EXPIRED', expiredAt: new Date().toISOString() })
+              expired++
+            }
+          }
+          emitToScene(sceneId, {
+            type: 'state_change',
+            step: 5,
+            title: '批量失效执行完成',
+            description: `已将 ${expired} 张券状态更新为 EXPIRED`,
+            data: { expiredCount: expired },
+            timestamp: Date.now(),
+          })
+        }
+
+        await delay(400)
+        emitToScene(sceneId, {
+          type: 'complete',
+          step: 5,
+          title: `场景2完成 ${approved ? '✅' : '⛔'}`,
+          description: approved ? '危险操作已通过人工审批执行' : '危险操作被人工拒绝，系统安全',
+          data: { approved, operator },
+          timestamp: Date.now(),
+        })
+      }
     }
   )
 }

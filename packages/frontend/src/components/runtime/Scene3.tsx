@@ -116,7 +116,7 @@ const Scene3: React.FC = () => {
     await new Promise(r => setTimeout(r, 300))
     setRunning(true)
     try {
-      await apiFetch('/api/scene/3/run', {
+      await apiFetch('/scene/3/run', {
         method: 'POST',
         body: JSON.stringify({ userId: 'alice', failAtStep }),
       })

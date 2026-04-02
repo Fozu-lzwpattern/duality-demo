@@ -1,6 +1,21 @@
-import React, { useState } from 'react'
-import { useFetch, apiFetch } from '../../hooks/useApi'
+import React, { useState, useEffect } from 'react'
+import { apiFetch } from '../../hooks/useApi'
 import type { UserProfile } from '../../types'
+
+interface RawUser {
+  id: string; emoji: string; name: string; tier: string
+  orderCount: number; totalSpend: number; ltv: number
+  businessTags: Record<string, number>
+  preferences: string[]; activeTime: string; location: string
+}
+
+function mapTier(raw: string): UserProfile['tier'] {
+  if (raw === '高价值' || raw === 'Whale') return 'Whale'
+  if (raw === '多业务重度' || raw === '成长型') return 'VIP'
+  if (raw === '高频低客单') return 'Regular'
+  if (raw === '新用户' || raw === 'New') return 'New'
+  return 'Regular'
+}
 import { Badge } from '../ui/Badge'
 import { Card } from '../ui/Card'
 
@@ -203,11 +218,40 @@ const UserCard: React.FC<{
 
 // ——— 主组件 ———
 const UserProfiles: React.FC = () => {
-  const { data: users, loading, error } = useFetch<UserProfile[]>('/users', FALLBACK_USERS)
+  const [users, setUsers] = useState<UserProfile[]>(FALLBACK_USERS)
+  const [loading, setLoading] = useState(true)
+  const [apiError, setApiError] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [setting, setSetting] = useState(false)
 
-  const displayUsers = error || loading ? FALLBACK_USERS : users
+  useEffect(() => {
+    fetch('/api/users')
+      .then(r => r.json())
+      .then((res: { ok: boolean; data: RawUser[] }) => {
+        if (res.ok && Array.isArray(res.data)) {
+          const mapped: UserProfile[] = res.data.map(u => ({
+            id: u.id,
+            emoji: u.emoji,
+            name: u.name,
+            tier: mapTier(u.tier),
+            orders: u.orderCount ?? 0,
+            totalSpend: u.totalSpend ?? 0,
+            ltv: u.ltv ?? 0,
+            tags: Object.entries(u.businessTags ?? {}).map(([label, weight]) => ({ label, weight: weight as number })),
+            preference: u.preferences ?? [],
+            activeTime: u.activeTime ?? '',
+            location: u.location ?? '',
+          }))
+          setUsers(mapped)
+        } else {
+          setApiError(true)
+        }
+      })
+      .catch(() => setApiError(true))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const displayUsers = users
 
   const handleSetCurrent = async (id: string) => {
     setSetting(true)
@@ -235,7 +279,7 @@ const UserProfiles: React.FC = () => {
             {displayUsers.length} 位用户 · 点击"设为当前用户"切换运行时用户身份
           </p>
         </div>
-        {(error || loading) && (
+        {(apiError || loading) && (
           <span className="ml-auto text-xs text-yellow-400 bg-yellow-400/10 border border-yellow-400/30 px-2 py-1 rounded">
             {loading ? '⏳ 加载中...' : '⚠️ 后端未连接，使用默认数据'}
           </span>

@@ -19,9 +19,15 @@ const App: React.FC = () => {
         <>
           <TabBar active={builderTab} onSwitch={setBuilderTab} />
           <div className="flex-1 overflow-hidden">
-            {builderTab === 'coupon' && <CouponSystem />}
-            {builderTab === 'users' && <UserProfiles />}
-            {builderTab === 'neural' && <NeuralInterface />}
+            <div style={{ display: builderTab === 'coupon' ? 'flex' : 'none', height: '100%', flexDirection: 'column' }}>
+              <CouponSystem />
+            </div>
+            <div style={{ display: builderTab === 'users' ? 'flex' : 'none', height: '100%', flexDirection: 'column' }}>
+              <UserProfiles />
+            </div>
+            <div style={{ display: builderTab === 'neural' ? 'flex' : 'none', height: '100%', flexDirection: 'column' }}>
+              <NeuralInterface />
+            </div>
           </div>
         </>
       )}
