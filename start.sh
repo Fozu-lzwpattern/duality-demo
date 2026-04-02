@@ -40,7 +40,7 @@ echo -e "${GREEN}✓ Node.js v$(node --version | tr -d 'v') 检测通过${NC}"
 
 # 释放端口（如果被占用）
 for PORT in $BACKEND_PORT $FRONTEND_PORT; do
-  PID=$(lsof -ti:$PORT 2>/dev/null || true)
+  PID=$(lsof -ti:$PORT 2>/dev/null || fuser $PORT/tcp 2>/dev/null || true)
   if [ -n "$PID" ]; then
     echo -e "${YELLOW}⚠️  端口 $PORT 被占用，正在释放 (PID $PID)...${NC}"
     kill -9 $PID 2>/dev/null || true
