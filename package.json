@@ -1,0 +1,10 @@
+{
+  "name": "duality-demo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix packages/backend run dev",
+    "build": "npm --prefix packages/backend run build"
+  },
+  "packageManager": "pnpm@10.29.2"
+}
