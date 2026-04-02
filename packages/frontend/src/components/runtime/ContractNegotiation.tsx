@@ -383,12 +383,38 @@ export const ContractNegotiation: React.FC<{ events: NegEv[]; mode: 'auto' | 'ma
         </div>
       </div>
 
-      {/* Center events — STRIKE / mint / FULFILLED / complete */}
+      {/* Center events — STRIKE / mint / FULFILLED / complete — unified panel */}
       {centerEvs.length > 0 && (
-        <div className="shrink-0 border-t border-border/60 px-3 py-2" style={{ background: '#0d1120', maxHeight: '45%', overflowY: 'auto' }}>
-          <AnimatePresence mode="sync">
-            {centerEvs.map(ev => <EvRow key={`c${ev.oi}`} ev={ev} idx={ev.oi} isCenter />)}
-          </AnimatePresence>
+        <div className="shrink-0 px-4 py-3" style={{ background: '#0a0d14' }}>
+          <div className="rounded-2xl border overflow-hidden" style={{ borderColor: '#60a5fa30', background: '#060c1a' }}>
+            <div className="px-3 py-1.5 border-b flex items-center gap-2" style={{ borderColor: '#60a5fa20', background: '#0d1830' }}>
+              <span className="text-xs font-bold tracking-widest uppercase" style={{ color: '#60a5fa99' }}>合约结算</span>
+            </div>
+            <div className="px-3 py-2 space-y-1">
+              <AnimatePresence mode="sync">
+                {centerEvs.map(ev => {
+                  const desc = describe(ev)
+                  if (!desc) return null
+                  const { icon, color, label, tag, tagColor } = desc
+                  return (
+                    <motion.div key={`c${ev.oi}`}
+                      initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: Math.min(ev.oi * 0.03, 0.2) }}
+                      className="flex items-center gap-2 py-1.5 text-xs">
+                      <span className="shrink-0 text-sm">{icon}</span>
+                      <span className="flex-1 font-medium" style={{ color }}>{label}</span>
+                      {tag && (
+                        <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold"
+                          style={{ background: (tagColor ?? color) + '20', color: tagColor ?? color }}>
+                          {tag}
+                        </span>
+                      )}
+                    </motion.div>
+                  )
+                })}
+              </AnimatePresence>
+            </div>
+          </div>
         </div>
       )}
 
