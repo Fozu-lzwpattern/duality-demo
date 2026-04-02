@@ -15,28 +15,26 @@ const App: React.FC = () => {
     <div className="flex flex-col h-screen bg-bg overflow-hidden">
       <TopNav mode={mode} onSwitch={setMode} />
 
-      {mode === 'builder' && (
-        <>
-          <TabBar active={builderTab} onSwitch={setBuilderTab} />
-          <div className="flex-1 overflow-hidden">
-            <div style={{ display: builderTab === 'coupon' ? 'flex' : 'none', height: '100%', flexDirection: 'column' }}>
-              <CouponSystem />
-            </div>
-            <div style={{ display: builderTab === 'users' ? 'flex' : 'none', height: '100%', flexDirection: 'column' }}>
-              <UserProfiles />
-            </div>
-            <div style={{ display: builderTab === 'neural' ? 'flex' : 'none', height: '100%', flexDirection: 'column' }}>
-              <NeuralInterface />
-            </div>
-          </div>
-        </>
-      )}
-
-      {mode === 'runtime' && (
+      {/* Builder — 始终挂载，切换模式时隐藏而不卸载，保留 NeuralInterface 执行状态 */}
+      <div style={{ display: mode === 'builder' ? 'flex' : 'none', flexDirection: 'column', flex: 1, overflow: 'hidden', minHeight: 0 }}>
+        <TabBar active={builderTab} onSwitch={setBuilderTab} />
         <div className="flex-1 overflow-hidden">
-          <RuntimeView />
+          <div style={{ display: builderTab === 'coupon' ? 'flex' : 'none', height: '100%', flexDirection: 'column' }}>
+            <CouponSystem />
+          </div>
+          <div style={{ display: builderTab === 'users' ? 'flex' : 'none', height: '100%', flexDirection: 'column' }}>
+            <UserProfiles />
+          </div>
+          <div style={{ display: builderTab === 'neural' ? 'flex' : 'none', height: '100%', flexDirection: 'column' }}>
+            <NeuralInterface />
+          </div>
         </div>
-      )}
+      </div>
+
+      {/* Runtime — 始终挂载，保留场景执行状态 */}
+      <div style={{ display: mode === 'runtime' ? 'flex' : 'none', flex: 1, overflow: 'hidden', flexDirection: 'column', minHeight: 0 }}>
+        <RuntimeView />
+      </div>
     </div>
   )
 }
