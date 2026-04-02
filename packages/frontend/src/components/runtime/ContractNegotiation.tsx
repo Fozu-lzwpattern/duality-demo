@@ -64,6 +64,10 @@ function describe(ev: NegEv): Desc | null {
   if (s === 'skip') return null
 
   if (s === 'left') {
+    // STRIKE — asC 侧成交信号（无 role 字段，靠 status 路由过来）
+    if (d.status === 'STRIKE')
+      return { icon: '🤝', color: '#60a5fa', label: `合约成交 STRIKE — 最终让利 ¥${d.finalBenefit ?? '?'}`,
+        tag: 'STRIKE ✅', tagColor: '#60a5fa' }
     if (d.intent && !d.evaluation && !d.decision && !d.counter && d.received !== 'REJECTED')
       return { icon: '💬', color: '#20c4cb', label: `"${d.intent}"`, tag: `${d.userName ?? ''} · LTV ${d.ltv ?? '?'}`, tagColor: '#20c4cb' }
     if (d.counter || (d as any).type === 'counter')
@@ -110,18 +114,30 @@ function describe(ev: NegEv): Desc | null {
     }
     if (d.isCounterProposal && d.draft)
       return { icon: '📤', color: '#f59e0b', label: '发出升级草案', draft: { ...d.draft, version: '升级版', isUpgrade: true } }
+    // dynamicMint — asB 实时铸券（无 role 字段，靠 minted 路由过来）
+    if (d.minted === 'on-demand') {
+      const parts = [
+        d.discountValue != null ? `优惠：¥${d.discountValue}` : null,
+        d.validWindow ? `有效期：${d.validWindow}` : null,
+        d.businessType ? `业务：${d.businessType}` : null,
+      ].filter(Boolean).join('  ')
+      return { icon: '⚡', color: '#818cf8', label: '实时制券 dynamicMint', body: parts || undefined, tag: '按需铸造', tagColor: '#818cf8' }
+    }
+    // FULFILLED — asB 完成履约（state_change 类型，靠 couponStatus/contractStatus 路由过来）
+    if (d.couponStatus === 'ISSUED' || d.contractStatus === 'FULFILLED')
+      return { icon: '✅', color: '#34d399', label: '合约履约完成 FULFILLED',
+        body: d.couponId ? `券ID：${d.couponId}` : undefined, tag: 'FULFILLED', tagColor: '#34d399' }
+    // complete — 全链路总结（type=complete，靠 ev.type 路由过来）
+    if (ev.type === 'complete')
+      return { icon: '🎉', color: '#34d399', label: ev.description ?? '合约经济全链路完成',
+        tag: '✅', tagColor: '#34d399' }
     return null
   }
 
-  // center
-  if (d.status === 'STRIKE')
-    return { icon: '🤝', color: '#60a5fa', label: `合约成交 STRIKE — 最终让利 ¥${d.finalBenefit ?? '?'}`,
-      body: d.narrative ?? undefined, tag: 'STRIKE ✅', tagColor: '#60a5fa' }
+  // fallback center block (should not reach here with current routing)
   if (d.minted === 'on-demand') {
     const parts = [
-      d.productBound ? `商品：${d.productBound}` : null,
       d.discountValue != null ? `优惠：¥${d.discountValue}` : null,
-      d.minOrderAmount ? `门槛：¥${d.minOrderAmount}` : null,
       d.validWindow ? `有效期：${d.validWindow}` : null,
     ].filter(Boolean).join('  ')
     return { icon: '⚡', color: '#818cf8', label: '实时制券 dynamicMint', body: parts || undefined, tag: '按需铸造', tagColor: '#818cf8' }
