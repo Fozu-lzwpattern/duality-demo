@@ -44,11 +44,11 @@ function side(ev: NegEv): Side {
   const d = ev.data ?? {}
   if (d.role === 'asC') return 'left'
   if (d.role === 'asB') return 'right'
-  if (d.status === 'STRIKE') return 'center'
-  if (d.minted === 'on-demand') return 'center'
-  if (d.couponStatus === 'ISSUED') return 'center'
-  if (ev.type === 'state_change' && d.contractStatus === 'FULFILLED') return 'center'
-  if (ev.type === 'complete') return 'center'
+  if (d.status === 'STRIKE') return 'left'        // asC 发出的成交信号
+  if (d.minted === 'on-demand') return 'right'    // asB 执行实时铸券
+  if (d.couponStatus === 'ISSUED') return 'right' // asB 完成履约
+  if (ev.type === 'state_change' && d.contractStatus === 'FULFILLED') return 'right' // asB 确认 FULFILLED
+  if (ev.type === 'complete') return 'right'      // asB 侧完成全链路
   return 'skip'
 }
 
@@ -325,18 +325,16 @@ export const ContractNegotiation: React.FC<{ events: NegEv[]; mode: 'auto' | 'ma
   const waitingForUser = !!(waitingEv && !responded && mode === 'manual')
   const contractId = waitingEv?.data?.contractId as string | undefined
 
-  // Strictly partition — center events NEVER go into left/right arrays
+  // Partition events into left (asC) and right (asB) columns only
   const leftEvs: (NegEv & { oi: number })[] = []
   const rightEvs: (NegEv & { oi: number })[] = []
-  const centerEvs: (NegEv & { oi: number })[] = []
 
   events.forEach((ev, i) => {
     const s = side(ev)
-    if (s === 'skip') return
+    if (s === 'skip' || s === 'center') return
     const item = { ...ev, oi: i }
     if (s === 'left') leftEvs.push(item)
-    else if (s === 'right') rightEvs.push(item)
-    else centerEvs.push(item)
+    else rightEvs.push(item)
   })
 
   return (
@@ -383,40 +381,7 @@ export const ContractNegotiation: React.FC<{ events: NegEv[]; mode: 'auto' | 'ma
         </div>
       </div>
 
-      {/* Center events — STRIKE / mint / FULFILLED / complete — unified panel */}
-      {centerEvs.length > 0 && (
-        <div className="shrink-0 px-4 py-3" style={{ background: '#0a0d14' }}>
-          <div className="rounded-2xl border overflow-hidden" style={{ borderColor: '#60a5fa30', background: '#060c1a' }}>
-            <div className="px-3 py-1.5 border-b flex items-center gap-2" style={{ borderColor: '#60a5fa20', background: '#0d1830' }}>
-              <span className="text-xs font-bold tracking-widest uppercase" style={{ color: '#60a5fa99' }}>合约结算</span>
-            </div>
-            <div className="px-3 py-2 space-y-1">
-              <AnimatePresence mode="sync">
-                {centerEvs.map(ev => {
-                  const desc = describe(ev)
-                  if (!desc) return null
-                  const { icon, color, label, tag, tagColor } = desc
-                  return (
-                    <motion.div key={`c${ev.oi}`}
-                      initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: Math.min(ev.oi * 0.03, 0.2) }}
-                      className="flex items-center gap-2 py-1.5 text-xs">
-                      <span className="shrink-0 text-sm">{icon}</span>
-                      <span className="flex-1 font-medium" style={{ color }}>{label}</span>
-                      {tag && (
-                        <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold"
-                          style={{ background: (tagColor ?? color) + '20', color: tagColor ?? color }}>
-                          {tag}
-                        </span>
-                      )}
-                    </motion.div>
-                  )
-                })}
-              </AnimatePresence>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* center partition removed — all events now in left/right columns */}
 
       {/* Phase progress */}
       <PhaseStrip phase={phase} />
