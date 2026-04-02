@@ -273,11 +273,13 @@ duality-demo/
 
 ---
 
-## 关联文档
+## 关联设计理念
 
-- [SuperSwitch Builder Spec](articles/superswitch-builder-spec-20260330.md) — Builder 层完整设计规格
-- [Duality Everything Is A System](articles/duality-everything-is-a-system-v17.md) — Duality 架构总览
-- [Agentic Commerce](articles/2026-03-11-agentic-commerce.md) — asC / asB / A2A 理论基础
+本 Demo 基于以下三个核心设计体系构建：
+
+- **SuperSwitch Builder Spec** — Builder 层能力建模、YAML 规格生成、风险矩阵设计
+- **Duality Architecture** — AI Agent 与商业系统双生融合的整体架构思想
+- **Agentic Commerce** — asC（数字消费者）/ asB（数字企业）/ A2A 合约经济理论基础
 
 ---
 
