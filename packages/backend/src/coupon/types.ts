@@ -215,7 +215,7 @@ export interface AuditEntry {
   action: string
   payload: Record<string, unknown>
   operator: 'agent' | 'human'
-  result: 'success' | 'failed' | 'rolled_back'
+  result: 'success' | 'failed' | 'rolled_back' | 'rejected'
   timestamp: number
 }
 

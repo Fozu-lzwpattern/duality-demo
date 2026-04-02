@@ -305,76 +305,156 @@ export function registerScene4Routes(app: FastifyInstance): void {
       })
 
       // Step 5: asB re-evaluate
+      // LTV 门槛：<20 为低信用，拒绝上调（REJECTED）；>=20 正常让利
+      const LTV_THRESHOLD = 20
       const maxAllowed = Math.min(user.ltv * 0.4, 50)
+      const rejected = user.ltv < LTV_THRESHOLD
 
       await emit(sceneId, {
         type: 'contract',
         step: 5,
         title: 'asB 重新评估让利空间',
-        description: `检查让利上限规则：maxAllowed = min(LTV×0.4, 50) = min(${user.ltv}×0.4, 50) = ${maxAllowed.toFixed(1)}`,
+        description: rejected
+          ? `LTV ${user.ltv} < 阈值 ${LTV_THRESHOLD}，信用评分不足，拒绝上调让利`
+          : `检查让利上限规则：maxAllowed = min(LTV×0.4, 50) = min(${user.ltv}×0.4, 50) = ${maxAllowed.toFixed(1)}`,
         data: {
           role: 'asB',
           ltv: user.ltv,
-          formula: `min(${user.ltv} × 0.4, 50)`,
-          maxAllowed,
+          ltvThreshold: LTV_THRESHOLD,
+          formula: rejected ? `LTV(${user.ltv}) < 阈值(${LTV_THRESHOLD})` : `min(${user.ltv} × 0.4, 50)`,
+          maxAllowed: rejected ? 0 : maxAllowed,
           requested: 36,
-          canGrant: maxAllowed >= 35,
+          canGrant: !rejected && maxAllowed >= 35,
+          rejected,
         },
       })
 
-      // Step 6: asB draft v2
-      const finalBenefit = 35
-      const draft2 = {
-        discount: 0.85,
-        maxBenefit: finalBenefit,
-        window: '19:00-21:00',
-        note: '已达让利上限',
+      if (rejected) {
+        // ─── REJECTED 路径 ───────────────────────────────────────────────────
+        const round2_reject: ContractRound = {
+          round: 2,
+          role: 'asB',
+          type: 'reject',
+          payload: { reason: `LTV(${user.ltv}) 低于信用门槛(${LTV_THRESHOLD})，合约无法达成` },
+          timestamp: Date.now(),
+        }
+        const cRej = getContract(contract.id)!
+        updateContract(contract.id, {
+          status: 'REJECTED',
+          negotiationRounds: [...cRej.negotiationRounds, round2_reject],
+        })
+
+        await emit(sceneId, {
+          type: 'contract',
+          step: 6,
+          title: '❌ asB 拒绝合约',
+          description: `用户信用评分（LTV ${user.ltv}）不满足最低门槛 ${LTV_THRESHOLD}，协商终止`,
+          data: {
+            role: 'asB',
+            decision: 'reject',
+            reason: `LTV(${user.ltv}) < 信用门槛(${LTV_THRESHOLD})`,
+            contractStatus: 'REJECTED',
+            suggestion: '建议先积累更多消费记录后再发起合约',
+          },
+        }, 600)
+
+        await emit(sceneId, {
+          type: 'contract',
+          step: 7,
+          title: 'asC 收到拒绝通知',
+          description: '本次合约协商未达成，asC 记录拒绝原因并归档',
+          data: {
+            role: 'asC',
+            received: 'REJECTED',
+            contractId: contract.id,
+            archiveReason: `信用评分不足，LTV ${user.ltv}`,
+          },
+        }, 500)
+
+        addAudit({
+          sceneId,
+          userId,
+          action: 'CONTRACT_REJECTED',
+          payload: {
+            contractId: contract.id,
+            ltv: user.ltv,
+            ltvThreshold: LTV_THRESHOLD,
+            reason: 'LTV below credit threshold',
+            intent,
+          },
+          operator: 'agent',
+          result: 'rejected',
+        })
+
+        await emit(sceneId, {
+          type: 'complete',
+          step: 8,
+          title: '场景4完成（协商失败）',
+          description: `合约经济的另一面：并非所有合约都会成交，系统有信用门槛保护`,
+          data: {
+            contractId: contract.id,
+            status: 'REJECTED',
+            ltv: user.ltv,
+            ltvThreshold: LTV_THRESHOLD,
+            message: '切换高价值用户（Alice/Carol/David）可观察到合约成交路径',
+          },
+        }, 400)
+      } else {
+        // ─── 正常 STRIKE 路径 ────────────────────────────────────────────────
+        // Step 6: asB draft v2
+        const finalBenefit = 35
+        const draft2 = {
+          discount: 0.85,
+          maxBenefit: finalBenefit,
+          window: '19:00-21:00',
+          note: '已达让利上限',
+        }
+
+        await emit(sceneId, {
+          type: 'contract',
+          step: 6,
+          title: 'asB 生成草案 v2',
+          description: `上调至 ¥${finalBenefit}（已达让利上限），附注：${draft2.note}`,
+          data: { role: 'asB', draft: draft2, round: 2 },
+        }, 600)
+
+        const round2_draft: ContractRound = {
+          round: 2,
+          role: 'asB',
+          type: 'draft',
+          payload: { draft: draft2 },
+          timestamp: Date.now(),
+        }
+
+        const c3 = getContract(contract.id)!
+        updateContract(contract.id, {
+          currentDraft: draft2,
+          negotiationRounds: [...c3.negotiationRounds, round2_draft],
+        })
+
+        // asC accepts v2
+        await emit(sceneId, {
+          type: 'contract',
+          step: 7,
+          title: 'asC 接受草案 v2',
+          description: `¥${finalBenefit} 在预期范围内，接受合约`,
+          data: { role: 'asC', decision: 'accept', draft: draft2, rounds: 2 },
+        }, 500)
+
+        const round2_accept: ContractRound = {
+          round: 2,
+          role: 'asC',
+          type: 'accept',
+          payload: { accepted: true, finalBenefit },
+          timestamp: Date.now(),
+        }
+        const c4 = getContract(contract.id)!
+        updateContract(contract.id, {
+          negotiationRounds: [...c4.negotiationRounds, round2_accept],
+        })
+
+        await executeContractStrike(sceneId, contract.id, userId, finalBenefit, 2, intent)
       }
-
-      await emit(sceneId, {
-        type: 'contract',
-        step: 6,
-        title: 'asB 生成草案 v2',
-        description: `上调至 ¥${finalBenefit}（已达让利上限），附注：${draft2.note}`,
-        data: { role: 'asB', draft: draft2, round: 2 },
-      }, 600)
-
-      const round2_draft: ContractRound = {
-        round: 2,
-        role: 'asB',
-        type: 'draft',
-        payload: { draft: draft2 },
-        timestamp: Date.now(),
-      }
-
-      const c3 = getContract(contract.id)!
-      updateContract(contract.id, {
-        currentDraft: draft2,
-        negotiationRounds: [...c3.negotiationRounds, round2_draft],
-      })
-
-      // asC accepts v2
-      await emit(sceneId, {
-        type: 'contract',
-        step: 7,
-        title: 'asC 接受草案 v2',
-        description: `¥${finalBenefit} 在预期范围内，接受合约`,
-        data: { role: 'asC', decision: 'accept', draft: draft2, rounds: 2 },
-      }, 500)
-
-      const round2_accept: ContractRound = {
-        round: 2,
-        role: 'asC',
-        type: 'accept',
-        payload: { accepted: true, finalBenefit },
-        timestamp: Date.now(),
-      }
-      const c4 = getContract(contract.id)!
-      updateContract(contract.id, {
-        negotiationRounds: [...c4.negotiationRounds, round2_accept],
-      })
-
-      await executeContractStrike(sceneId, contract.id, userId, finalBenefit, 2, intent)
     }
   })
 
